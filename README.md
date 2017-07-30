@@ -14,7 +14,7 @@ p1 = 2*x*y + 7*y**2
 p2 = y**2 * (x**2 + x + 1)
 
 print(p1 + p2)
-print(divmod(p2, p1)
+print(divmod(p2, p1))
 ```
 
 TODO: implement evaluation.
