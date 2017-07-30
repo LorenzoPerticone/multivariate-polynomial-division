@@ -9,7 +9,7 @@ Here is a (very basic) example of usage of this library:
 from polynomials import Variable
 
 x = Variable()
-y = Variable
+y = Variable()
 p1 = 2*x*y + 7*y**2
 p2 = y**2 * (x**2 + x + 1)
 
