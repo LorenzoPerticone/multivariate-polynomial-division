@@ -6,7 +6,7 @@ This library should be fairly easy to use, needing almost no "boilerplate code" 
 Here is a (very basic) example of usage of this library:
 
 ```python
-from polynomials import Variable, Polynomial
+from polynomials import Variable
 
 x = Variable()
 y = Variable
