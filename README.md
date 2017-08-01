@@ -17,4 +17,4 @@ print(p1 + p2)
 print(divmod(p2, p1))
 ```
 
-TODO: implement evaluation.
+It now supports evaluation, derivation and integration (both definite, a.k.a. in a product of intervals, and indefinite, a.k.a. formal)
