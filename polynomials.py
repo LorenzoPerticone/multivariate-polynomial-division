@@ -152,7 +152,7 @@ class Scalar(scalar, DeduceOrder, DeduceOperations):
 
 class Variable(DeduceOrder, DeduceOperations):
     smallerTypes = {}
-    instances = []
+    ids = []
     nextId = 0
 
     def __init__(self):
@@ -162,13 +162,17 @@ class Variable(DeduceOrder, DeduceOperations):
     @classmethod
     def newId(cls):
         id = cls.nextId
-        cls.instances.append(id)
-        while cls.nextId in cls.instances:
+        cls.ids.append(id)
+        while cls.nextId in cls.ids:
             cls.nextId += 1
         return id
 
     def key(self):
         return self.id
+
+    @classmethod
+    def getInstances(cls):
+        return cls.instances
 
     @classmethod
     def finalize(cls):
@@ -193,6 +197,12 @@ class Variable(DeduceOrder, DeduceOperations):
     def mul(self, other):
         return Monomial(1, self, other)
 
+    def eval(self, arguments):
+        k = self.key()
+        if k in arguments:
+            return arguments[k]
+        return self
+
 class Monomial(DeduceOrder, DeduceOperations):
     smallerTypes = {int: lambda x: Monomial(x),
                     float: lambda x: Monomial(x),
@@ -204,14 +214,16 @@ class Monomial(DeduceOrder, DeduceOperations):
         self.coeff = Scalar(coeff)
         if self.coeff != 0:
             self.variables = sorted(list(variables), reverse = True)
-            counts = {i: 0 for i in Variable.instances}
+            counts = {i: 0 for i in Variable.ids}
             for variable in variables:
                 counts[variable.key()] += 1
-            self.group = [(i, counts[i])
-                          for i in Variable.instances[::-1]]
+            self.group = {i: counts[i]
+                          for i in Variable.ids[::-1]}
+            #self.group = [(i, counts[i])
+            #              for i in Variable.ids[::-1]]
         else:
             self.variables = []
-            self.group = []
+            self.group = {}
 
     @classmethod
     def finalize(cls):
@@ -219,7 +231,7 @@ class Monomial(DeduceOrder, DeduceOperations):
             cls.smallerTypes[Monomial] = lambda x: Monomial(x.coeff, *x.variables)
 
     def key(self):
-        return [p for v, p in self.group] + [self.coeff]
+        return [self.group[k] for k in self.group] + [self.coeff]
 
     def coerce(self):
         return Polynomial(self)
@@ -241,12 +253,16 @@ class Monomial(DeduceOrder, DeduceOperations):
         else:
             head = repr(self.coeff)
 
-        useful = [(i, j) for i, j in self.group if j != 0]
+        useful = [(i, self.group[i])
+                  for i in self.group
+                  if self.group[i] != 0]
         tail = ' * '.join(map(lambda x: ('x_{}^{}'.format(x[0], x[1]) if x[1] > 1
                                          else 'x_{}'.format(x[0])),
                               useful))
 
         if tail == '':
+            if head == '':
+                return '1.0'
             return head
         if head == '':
             return tail
@@ -267,6 +283,10 @@ class Monomial(DeduceOrder, DeduceOperations):
     def mul(self, other):
         return Monomial(self.coeff * other.coeff,
                         *(self.variables + other.variables))
+
+    def eval(self, arguments):
+        return reduce(lambda x, v: x * v.eval(arguments),
+                      self.variables, self.coeff)
 
 class Polynomial(DeduceOrder, DeduceOperations):
     smallerTypes = {int: lambda x: Polynomial(Monomial(x)),
@@ -345,25 +365,61 @@ class Polynomial(DeduceOrder, DeduceOperations):
     def __mod__(self, other):
         return divmod(self, other)[1]
 
+    def eval(self, arguments):
+        return reduce(lambda x, m: x + m.eval(arguments),
+                      self.monomials, 0)
+
+    def __call__(self, *args):
+        return self.eval({i: args[i] for i in range(len(args))})
+
+    def derivative(self, *args):
+        if not isUniform(args, Variable):
+            raise ValueError('Can only derive by variables')
+        res = self
+        for var in args:
+            res = derive(res, var)
+        return res
+
+    def integral(self, *args, formalIntegration = None):
+        if isUniform(args, Variable) and (formalIntegration != False):
+            res = self
+            for var in args:
+                res = formallyIntegrate(res, var)
+            return res
+        
+        if isUniform(args, list) and (formalIntegration != True):
+            res = self
+            for i, interval in zip(Variable.ids, args):
+                a, b = interval[0], interval[1]
+                res = res.eval({i: b}) - res.eval({i: a})
+            return res
+
+        raise ValueError('Invalid parameters for integration')
+
 #returns a list of the elements of lst1 that are not in lst2
-#(counted with multiplicity: if lst1 = [1, 1, 2], lst2 = [1]
-#then listDiff(lst1, lst2) = [1, 2]
+#(counted with multiplicity: if lst1 = [2, 1, 1], lst2 = [1]
+#then listDiff(lst1, lst2) = [2, 1]
+#
+#lists are assumed to be ordered decreasingly!
 def listDiff(lst1, lst2):
     if lst1 == []:#trivial
         return []
+
+    fst1, rest1 = lst1[0], lst1[1:]
     
     if lst2 == []:#trivial
         return lst1
-    
-    if lst1[0] == lst2[0]:#lst1[0] appears in both: ignore
-        return listDiff(lst1[1:], lst2[1:])
-    
-    if lst1[0] > lst2[0]:#lst[1] does not appear in lst2: take it
-        return [lst1[0]] + listDiff(lst1[1:], lst2)
 
-    #should never happen!
-    if lst1[0] < lst2[0]:#lst[1] might appear later on in lst2
-        return listDiff(lst1, lst2[1:])
+    fst2, rest2 = lst2[0], lst2[1:]
+
+    if fst1 == fst2:#lst1[0] appears in both: ignore
+        return listDiff(rest1, rest2)
+
+    if fst1 > fst2:#lst[1] does not appear in lst2: take it
+        return [fst1] + listDiff(rest1, lst2)
+
+    if fst1 < fst2:#lst[1] might appear later on in lst2
+        return listDiff(lst1, rest2)
 
 #short division is for monomials, and never returns
 def shortDivision(dividend, divisor):
@@ -391,10 +447,34 @@ def longDivision(dividend, divisor):
         quotient += partQuotient
 
     return quotient, dividend
+
+def deriveMonomial(monomial, variable):
+    if variable not in monomial.variables:
+        return Monomial(0)
+    res = Monomial(monomial.coeff * monomial.group[variable.id],
+                   *listDiff(monomial.variables, [variable]))
+    return res
     
-if __name__ == '__main__':
+
+def derive(polynomial, variable):
+    return Polynomial(*[deriveMonomial(monomial, variable)
+                        for monomial in polynomial.monomials])
+
+def formallyIntegrateMonomial(monomial, variable):
+    if variable not in monomial.variables:
+        return Monomial(monomial.coeff, variable,
+                        *monomial.variables)
+    return Monomial(monomial.coeff / (monomial.group[variable.id] + 1),
+                    variable, *monomial.variables)
+
+def formallyIntegrate(polynomial, variable):
+    return Polynomial(*[formallyIntegrateMonomial(monomial, variable)
+                        for monomial in polynomial.monomials])
+    
+if __name__ == '__main__': #some tests and use cases:
     x = Variable()
     y = Variable()
+    z = Variable()
     m1 = x * 2 * y
     m2 = x**2 * (-3) * y
     print(m1)
@@ -404,7 +484,7 @@ if __name__ == '__main__':
     p = m**2
     print(p)
     m, p = m + p, m * p
-    print(m)
+    print('m = {}'.format(m))
     print(p)
     q, r = divmod(p, m)
     print(q)
@@ -416,4 +496,12 @@ if __name__ == '__main__':
     print(r)
     print(m * q + r == p)
 
-    
+    print(m(1))
+    print(m(1, 2))
+
+    m = x**2 + x*y
+    print(m)
+    print(m.derivative(x))
+    print(m.derivative(x, y))
+    print(m.integral(x, y))
+    print(m.integral([1, 2], [3, 4]))
